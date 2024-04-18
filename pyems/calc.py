@@ -214,7 +214,7 @@ def microstrip_effective_dielectric(
     common_factor = 1 / np.sqrt(1 + (12 / wh_ratio))
 
     if wh_ratio < 1:
-        factor = common_factor + (0.04 * ((1 - wh_ratio) ^ 2))
+        factor = common_factor + (0.04 * ((1 - wh_ratio) ** 2))
     else:
         factor = common_factor
 

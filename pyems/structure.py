@@ -813,7 +813,7 @@ class ViaWall(Structure):
         )
         for layer in self._noconnect_layers:
             zpos = self._pcb.copper_layer_elevation(layer)
-            box = _box()
+            box = self._box()
             box.min_corner.y -= self._antipad_width
             box.max_corner.y += self._antipad_width
             box.min_corner.z = zpos
@@ -835,6 +835,173 @@ class ViaWall(Structure):
         """
         return "Via_Wall_Antipad_" + str(self._index)
 
+class MetalPolygon(Structure):
+    """
+    Generic 2D metal polygon builder. Builds a polygon from 
+    sequential points, and automatically closes the polygon if 
+    the first and last coordinates are not equal. 
+
+    Polygon cannot be self intersecting. 
+    """
+
+    def __init__(
+        self, 
+        pcb: PCB, 
+        coordinates: list,
+        position: C2TupleOp,
+        trace_layer: int = 0,
+        gnd_layer: int = 1,
+        fill: bool = True,
+        width: float = 0.0,
+        transform: CSTransform = None,
+    ):
+        """
+        :param pcb: PCB object to which the microstrip line should be
+            added.
+        :param coordinates: List of points from which to draw the polygon.
+            The coordinates will automatically enclose, and draws straight lines between
+            sequential coordinates. 
+        :param position: Position of the first coordinate. The
+            z-coordinate is determined by the PCB layer.
+        :param trace_layer: PCB layer of the signal trace. Uses
+            copper layer index values.
+        :param gnd_layer: PCB layer of the ground plane.  Uses copper
+            layer index values.  Can be set to None when not using a
+            port.
+        :param fill: If true, then polygon is filled in with copper. If false, 
+            then the width is used to create an outline. 
+        :param transform: CSTransform to apply to microstrip.
+        """
+        self._pcb = pcb
+        self._coordinates = coordinates
+        self._check_coordinates()
+        self._position = c2_maybe_tuple(position)
+        self._fill = fill
+        if not self._fill and width == 0.0:
+            raise ValueError("Cannot create a polygon with no fill and 0 width.")
+        self._metal_width = width
+        self._trace_layer = trace_layer
+        self._gnd_layer = gnd_layer
+        self._transform = transform
+        self._polygons = []
+        self.construct(self.coordinates)
+
+    @property
+    def pcb(self) -> int:
+        """
+        """
+        return self._pcb
+
+    @property
+    def position(self) -> Coordinate2:
+        """
+        """
+        return self._position
+
+    @property
+    def transform(self) -> CSTransform:
+        """
+        """
+        return self._transform
+    
+    @property
+    def coordinates(self) -> list:
+        """
+        """
+        return self._coordinates
+
+    def _check_vector_intersection(
+            self, 
+            a0:Coordinate2, 
+            a1:Coordinate2, 
+            b0:Coordinate2, 
+            b1:Coordinate2
+        ):
+        """
+        From https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
+
+        :param a0: Starting coordinate of line 1
+        :param a1: Ending coordinate of line 1
+        :param b0: Starting coordinate of line 2
+        :param b1: Ending coordinate of line 2
+        :return: True if line segments intersect, false if not.
+        """
+        s1_x = a1.x - a0.x
+        s1_y = a1.y - a0.y
+        s2_x = b1.x - b0.x
+        s2_y = b1.y - b0.y
+        if s2_x * s1_y == s1_x * s2_y:
+            # Segments are equal, return false. 
+            return False
+        s = (-s1_y * (a0.x - b0.x) + s1_x * (a0.y - b0.y)) / (-s2_x * s1_y + s1_x * s2_y)
+        t = ( s2_x * (a0.y - b0.y) - s2_y * (a0.x - b0.x)) / (-s2_x * s1_y + s1_x * s2_y)
+        if s > 0 and s < 1 and t > 0 and t < 1:
+            # Collision detected
+            return True
+        return False
+
+    def _check_coordinates(self):
+        """
+        Function to sanity check the coordinates. 
+        Mainly checks that the coordinates doesn't create a self intersecting 
+        polygon. 
+        """
+        # Any polygon has to have more than 3 coordinates in order 
+        # to be an enclosed system:
+        if len(self.coordinates) < 3:
+            raise ValueError("Must provide at least 3 coordinates to create an enclosed polygon.")
+        
+        # Loop through all coordinates and check that they don't intersect any other. 
+        #for i,coordinate_ut in enumerate(self.coordinates[1:]):
+        for i in range(1,len(self.coordinates)):
+            # The previous coordinate and current coordinate here create
+            # the vector we want to check against all other vectors, other than itself
+            a0 = self.coordinates[i-1]
+            a1 = self.coordinates[i]
+
+            # Loop through all coordinates after these to not check intersections
+            # multiple times. 
+            #for j, coordinate in enumerate(self.coordinates[i:]):
+            for j in range(i+1,len(self.coordinates)):
+                b0 = self.coordinates[j-1]
+                b1 = self.coordinates[j]
+                if self._check_vector_intersection(a0, a1, b0, b1):
+                    raise ValueError(f"Line segments ({a0.x},{a0.y})-({a1.x},{a1.y}) intersect with ({b0.x},{b0.y})-({b1.x},{b1.y})")
+
+    def _polygon_name(self) -> str:
+        """
+        """
+        return "polygon_" + str(self._index)
+    
+    def _poly_z(self) -> float:
+        """
+        """
+        return self.pcb.copper_layer_elevation(self._trace_layer)
+
+    def construct(self, coordinates):
+        """
+        Creates the actual polygon from metal. 
+        """
+        self._index = self._get_inc_ctr()
+        poly_prop = add_conducting_sheet(
+            csx=self.pcb.sim.csx,
+            name=self._polygon_name(),
+            conductivity=self.pcb.pcb_prop.metal_conductivity(),
+            thickness=self.pcb.pcb_prop.copper_thickness(self._trace_layer),
+        )
+        poly_z = self._poly_z()
+
+        poly = construct_polygon(
+            prop=poly_prop,
+            points=coordinates,
+            normal=Axis("z"),
+            elevation=poly_z,
+            priority=priorities["trace"],
+            transform=self.transform,
+        )
+        poly_pts = prim_coords2(poly)
+        self.polygons.append(poly_pts)
+        
 
 class Microstrip(Structure):
     """

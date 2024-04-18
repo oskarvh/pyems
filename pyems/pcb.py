@@ -158,5 +158,12 @@ common_pcbs = {
         substrate_thickness=[0.1702e-3, 1.1938e-3, 0.1702e-3],
         metal_conductivity=5.8e7,
         via_plating_thickness=0.0254e-3,
+    ),
+    "jlcpcb2": PCBProperties(
+        substrate=common_dielectrics["JLC0216"],
+        copper_thickness=[0.035e-3, 0.035e-3],
+        substrate_thickness=[1.465e-3],
+        metal_conductivity=5.8e7,
+        via_plating_thickness=0.018e-3,
     )
 }

@@ -74,4 +74,8 @@ common_dielectrics = {
         ],
     ),
     "PTFE": Dielectric(epsr=[(1, 2.06)], loss=[(1, 0.0002)]),
+    "JLC0216":Dielectric(
+        epsr=[(1e9, 4.4)],
+        loss=[(1e9, 0.03),],
+    ),
 }
