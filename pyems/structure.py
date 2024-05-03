@@ -847,7 +847,7 @@ class MetalPolygon(Structure):
     def __init__(
         self, 
         pcb: PCB, 
-        coordinates: list,
+        coordinates: List[Coordinate2],
         position: C2TupleOp,
         trace_layer: int = 0,
         gnd_layer: int = 1,
@@ -856,11 +856,11 @@ class MetalPolygon(Structure):
         transform: CSTransform = None,
     ):
         """
-        :param pcb: PCB object to which the microstrip line should be
-            added.
+        :param pcb: PCB object to which the polygon should be added.
         :param coordinates: List of points from which to draw the polygon.
             The coordinates will automatically enclose, and draws straight lines between
             sequential coordinates. 
+            The polygon is referenced from the first coordinate.
         :param position: Position of the first coordinate. The
             z-coordinate is determined by the PCB layer.
         :param trace_layer: PCB layer of the signal trace. Uses
@@ -870,7 +870,7 @@ class MetalPolygon(Structure):
             port.
         :param fill: If true, then polygon is filled in with copper. If false, 
             then the width is used to create an outline. 
-        :param transform: CSTransform to apply to microstrip.
+        :param transform: CSTransform to apply to polygon.
         """
         self._pcb = pcb
         self._coordinates = coordinates
@@ -905,7 +905,7 @@ class MetalPolygon(Structure):
         return self._transform
     
     @property
-    def coordinates(self) -> list:
+    def coordinates(self) -> List[Coordinate2]:
         """
         """
         return self._coordinates
@@ -967,7 +967,10 @@ class MetalPolygon(Structure):
                 b1 = self.coordinates[j]
                 if self._check_vector_intersection(a0, a1, b0, b1):
                     raise ValueError(f"Line segments ({a0.x},{a0.y})-({a1.x},{a1.y}) intersect with ({b0.x},{b0.y})-({b1.x},{b1.y})")
-
+        # Check if the last coordinate isn't the same as the first, in which case add it. 
+        if (self.coordinates[0].x != self.coordinates[-1].x) and (self.coordinates[0].y != self.coordinates[-1].y):
+            self._coordinates.append(Coordinate2(self.coordinates[0].x, self.coordinates[0].y))
+            
     def _polygon_name(self) -> str:
         """
         """
@@ -978,11 +981,12 @@ class MetalPolygon(Structure):
         """
         return self.pcb.copper_layer_elevation(self._trace_layer)
 
-    def construct(self, coordinates):
+    def construct(self, coordinates:List[Coordinate2], transform: CSTransform = None):
         """
         Creates the actual polygon from metal. 
         """
         self._index = self._get_inc_ctr()
+        self._transform = append_transform(self.transform, transform)
         poly_prop = add_conducting_sheet(
             csx=self.pcb.sim.csx,
             name=self._polygon_name(),
